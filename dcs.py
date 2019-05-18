@@ -5,7 +5,7 @@ import datetime
 import codecs
 
 
-# Not clear in DCPR Documentation: BCD Date order is little-endian (i.e. ZZZSSMMHHDDDYY)
+
 # https://dcs1.noaa.gov/documents/HRIT%20DCS%20File%20Format%20Rev1.pdf - Page 5 - 3.3.1.4.
 def bcd_to_date(data):
 	year = format(data[6],'02x')                                     # Last 2 Digits of Year
@@ -48,11 +48,11 @@ def odd_parity6(num):
 	even_parity = one_count & 0b1 
 	return int(not even_parity)
 
-def do_nothing():
+def do_nothing(): # We don't need to encode messages
 	pass
 
-def pseudo_decode(binary: bytes) -> str:
-	return ''.join(chr((x & 0x3F)) for x in binary), len(binary)
+def pseudo_decode(binary: bytes) -> str: # Discard the Parity Bit, it's just ASCII
+	return ''.join(chr((x & 0x7F) ) for x in binary), len(binary)
 
 	
 def pseudo_search_func(encoding_name):
@@ -66,6 +66,7 @@ def dcpblock(block_data):
 	if blk_id == 1:
 		bauds = ['Undefined','100','300','1200']
 		platforms = ['CS1', 'CS2']
+		modulation_indicies = ['Unknown','Normal','High','Low']
 		scids = ['Unknown','GOES-East','GOES-West','GOES-Central','GOES-Test'] # Spacecraft ID's
 
 		blk_len = int.from_bytes(block_data[0x01:0x03],byteorder='little')
@@ -83,12 +84,12 @@ def dcpblock(block_data):
 		carr_start = block_data[0x0C:0x13]
 		msg_start = block_data[0x13:0x1A]
 		
-		#print(np.unpackbits(block_data[0x20]))
 		sig_strength = int.from_bytes(block_data[0x1A:0x1C],byteorder='little') & 0x03FF
 		freq_offset = int.from_bytes(block_data[0x1C:0x1E],byteorder='little')  & 0x3FFF
 		if freq_offset > 8191: # 2's complement conversion
 			freq_offset = freq_offset - 16384
 		phs_noise = int.from_bytes(block_data[0x1E:0x20],byteorder='little')  & 0x01FFF
+		mod_index = modulation_indicies[(int.from_bytes(block_data[0x1E:0x20],byteorder='little')  & 0x0C000) >> 14]
 		good_phs = int.from_bytes(block_data[0x20:0x21],byteorder='little')
 		
 		channel  = int.from_bytes(block_data[0x21:0x23],byteorder='little') & 0x03FF
@@ -98,10 +99,6 @@ def dcpblock(block_data):
 		
 		codecs.register(pseudo_search_func)
 		dcp_data_pseudo = codecs.decode(block_data[0x27:-2],encoding='pseudo-binary')
-		dcp_data_pseudo = re.sub(r"\r\n", " ", dcp_data_pseudo)
-		dcp_data_ascii = codecs.decode(block_data[0x27:-2],encoding='ascii',errors='ignore')
-
-
 		dcp_crc16 = int.from_bytes(block_data[-2:],byteorder='little')
 		calc_crc = binascii.crc_hqx(block_data[0x0:-0x02],0xFFFF)
 
@@ -121,6 +118,7 @@ def dcpblock(block_data):
 		print('    Signal Strength: {}dBm EIRP'.format(sig_strength/10))
 		print('    Frequency Offset: {}Hz'.format(freq_offset/10))
 		print('    Phase Noise: {}° RMS'.format(phs_noise/100))
+		print('    Modulation Index: {}'.format(mod_index))
 		print('    Good Phase: {}%'.format(good_phs/2))
 		print('    Channel: {}'.format(channel))
 		print('    Spacecraft: {}'.format(scids[spacecraft]))
@@ -130,44 +128,50 @@ def dcpblock(block_data):
 			print('    Block CRC: OK\n')
 		else:
 			print('    CRC: FAILED\n')
-		print('Data (ASCII): \n{}'.format(dcp_data_ascii))
-		#print('Data (Pseudo-Binary): \n{}'.format(dcp_data_pseudo))
+		print('Data (Pseudo-Binary): \n{}'.format(dcp_data_pseudo))
 
 
+def main():
+	print('DCS Decoder - Taylor Bates\n')
 
-print('DCS Decoder - Taylor Bates\n')
+	# Open the file
+	with open(sys.argv[1],'rb') as file:
+		file_data = bytes(file.read())
+		locs = []
 
-# Open the file
-with open(sys.argv[1],'rb') as file:
-	file_data = bytes(file.read())
-	locs = []
+	# Strip the HRIT Header
+	for loc in re.finditer(b'pH',file_data):
+		locs.append(loc.start())
+	file_data = file_data[locs[1]:]
 
-# Strip the HRIT Header
-for loc in re.finditer(b'pH',file_data):
-	locs.append(loc.start())
-file_data = file_data[locs[1]:]
+	# DCS File Header
+	filename = file_data[0x0:0x20].decode('ascii')
+	file_size = int(file_data[0x20:0x28].decode('ascii'))
+	file_source = file_data[0x28:0x2C].decode('ascii')
+	file_type = file_data[0x2C:0x30].decode('ascii')
 
-# DCS File Header
-filename = file_data[0x0:0x20].decode('ascii')
-file_size = int(file_data[0x20:0x28].decode('ascii'))
-file_source = file_data[0x28:0x2C].decode('ascii')
-file_type = file_data[0x2C:0x30].decode('ascii')
-
-print('----------[ DCS Header Info ]----------')
-print('Filename: {}'.format(filename))
-print('File Size: {} Bytes'.format(file_size))
-print('File Source: {}'.format(file_source))
-print('File Type: {}'.format(file_type))
-if binascii.crc32(file_data[0x0:0x3C]) == int.from_bytes(file_data[0x3C:0x40],byteorder='little'):
-	print('CRC: OK\n')
-else:
-	print('CRC: FAILED\n')
+	print('----------[ DCS Header Info ]----------')
+	print('Filename: {}'.format(filename))
+	print('File Size: {} Bytes'.format(file_size))
+	print('File Source: {}'.format(file_source))
+	print('File Type: {}'.format(file_type))
+	if binascii.crc32(file_data[0x0:0x3C]) == int.from_bytes(file_data[0x3C:0x40],byteorder='little'):
+		print('CRC: OK\n')
+	else:
+		print('CRC: FAILED\n')
 
 
-block_offset = 0x40
+	block_offset = 0x40
+	while block_offset < file_size-0x04:
+		block_length = int.from_bytes(file_data[block_offset+1:block_offset+3],byteorder='little')
+		dcpblock(file_data[block_offset:block_offset+block_length])
+		block_offset = block_offset + block_length
 
-while block_offset < file_size-0x04:
-	block_length = int.from_bytes(file_data[block_offset+1:block_offset+3],byteorder='little')
-	dcpblock(file_data[block_offset:block_offset+block_length])
-	block_offset = block_offset + block_length
+if __name__ == '__main__':
+    main()
+
+
+	
+
+
 
