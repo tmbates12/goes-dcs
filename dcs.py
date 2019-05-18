@@ -97,9 +97,9 @@ def dcpblock(block_data):
 		source_sec = block_data[0x25:0x27].decode('ascii')
 		
 		codecs.register(pseudo_search_func)
-		#dcp_data = codecs.decode(block_data[0x27:-2],encoding='pseudo-binary')
-		#dcp_data = re.sub(r"\r\n", " ", dcp_data)
-		dcp_data = codecs.decode(block_data[0x27:-2],encoding='ascii',errors='ignore')
+		dcp_data_pseudo = codecs.decode(block_data[0x27:-2],encoding='pseudo-binary')
+		dcp_data_pseudo = re.sub(r"\r\n", " ", dcp_data_pseudo)
+		dcp_data_ascii = codecs.decode(block_data[0x27:-2],encoding='ascii',errors='ignore')
 
 
 		dcp_crc16 = int.from_bytes(block_data[-2:],byteorder='little')
@@ -130,8 +130,8 @@ def dcpblock(block_data):
 			print('    Block CRC: OK\n')
 		else:
 			print('    CRC: FAILED\n')
-		print('Data: \n{}'.format(dcp_data))
-		#print(''.join(' {:02x}'.format((x & 0x3F) | 0b00100000) for x in block_data[0x27:-2]))
+		print('Data (ASCII): \n{}'.format(dcp_data_ascii))
+		#print('Data (Pseudo-Binary): \n{}'.format(dcp_data_pseudo))
 
 
 
@@ -163,10 +163,6 @@ if binascii.crc32(file_data[0x0:0x3C]) == int.from_bytes(file_data[0x3C:0x40],by
 else:
 	print('CRC: FAILED\n')
 
-# Data Blocks
-
-
-
 
 block_offset = 0x40
 
@@ -174,5 +170,4 @@ while block_offset < file_size-0x04:
 	block_length = int.from_bytes(file_data[block_offset+1:block_offset+3],byteorder='little')
 	dcpblock(file_data[block_offset:block_offset+block_length])
 	block_offset = block_offset + block_length
-input('Finished - Press Enter to Exit')
 
