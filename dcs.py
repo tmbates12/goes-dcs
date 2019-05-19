@@ -40,13 +40,8 @@ def parse_arm(flag_byte):
 			text += 'G'
 		return text
 
+
 # NOAA DCS Pseudo-binary encoding: https://www.noaasis.noaa.gov/DCS/docs/DCPR_CS2_final_June09.pdf
-def odd_parity6(num):
-	one_count = 0
-	for i in range(0,5):
-		one_count += (ascii6 >> i) & 0b1
-	even_parity = one_count & 0b1 
-	return int(not even_parity)
 
 def do_nothing(): # We don't need to encode messages
 	pass
@@ -61,74 +56,108 @@ def pseudo_search_func(encoding_name):
 
 
 
-def dcpblock(block_data):
-	blk_id = int.from_bytes(block_data[0x00:0x01],byteorder='little')
-	if blk_id == 1:
-		bauds = ['Undefined','100','300','1200']
-		platforms = ['CS1', 'CS2']
-		modulation_indicies = ['Unknown','Normal','High','Low']
-		scids = ['Unknown','GOES-East','GOES-West','GOES-Central','GOES-Test'] # Spacecraft ID's
+def dcp_block(block_data):
+	bauds = ['Undefined','100','300','1200']
+	platforms = ['CS1', 'CS2']
+	modulation_indicies = ['Unknown','Normal','High','Low']
+	scids = ['Unknown','GOES-East','GOES-West','GOES-Central','GOES-Test'] # Spacecraft ID's
 
-		blk_len = int.from_bytes(block_data[0x01:0x03],byteorder='little')
-		seq_num = int.from_bytes(block_data[0x03:0x06],byteorder='little')
+	blk_len = int.from_bytes(block_data[0x01:0x03],byteorder='little')
+	seq_num = int.from_bytes(block_data[0x03:0x06],byteorder='little')
 		
-		flags = block_data[0x06]
-		baud = bauds[(flags & 0b111)]                 # B0 of flags defines the DCP Data Rate
-		platform = platforms[(flags & 0b1000) >> 3]   # B1 is the platform type
-		rx_parity = bool((flags & 0b10000) >> 4)      # Presence of Parity Errors in DCP Data
+	flags = block_data[0x06]
+	baud = bauds[(flags & 0b111)]                 # B0-B2 of flags defines the DCP Data Rate
+	platform = platforms[(flags & 0b1000) >> 3]   # B3 is the platform type
+	rx_parity = bool((flags & 0b10000) >> 4)      # Presence of Parity Errors in DCP Data
 
-		arm_flags = block_data[0x07] # Abnormal Received Messages Flags
-		arm_text = parse_arm(arm_flags)
+	arm_flags = block_data[0x07] # Abnormal Received Messages Flags
+	arm_text = parse_arm(arm_flags)
 
-		corrected_addr = hex(int.from_bytes(block_data[0x08:0x0C],byteorder='little'))
-		carr_start = block_data[0x0C:0x13]
-		msg_start = block_data[0x13:0x1A]
+	corrected_addr = hex(int.from_bytes(block_data[0x08:0x0C],byteorder='little'))
+	carr_start = block_data[0x0C:0x13]
+	msg_end = block_data[0x13:0x1A]
 		
-		sig_strength = int.from_bytes(block_data[0x1A:0x1C],byteorder='little') & 0x03FF
-		freq_offset = int.from_bytes(block_data[0x1C:0x1E],byteorder='little')  & 0x3FFF
-		if freq_offset > 8191: # 2's complement conversion
-			freq_offset = freq_offset - 16384
-		phs_noise = int.from_bytes(block_data[0x1E:0x20],byteorder='little')  & 0x01FFF
-		mod_index = modulation_indicies[(int.from_bytes(block_data[0x1E:0x20],byteorder='little')  & 0x0C000) >> 14]
-		good_phs = int.from_bytes(block_data[0x20:0x21],byteorder='little')
-		
-		channel  = int.from_bytes(block_data[0x21:0x23],byteorder='little') & 0x03FF
-		spacecraft = int.from_bytes(block_data[0x21:0x23],byteorder='little') >> 12
-		source_code = block_data[0x23:0x25].decode('ascii')
-		source_sec = block_data[0x25:0x27].decode('ascii')
-		
-		codecs.register(pseudo_search_func)
-		dcp_data_pseudo = codecs.decode(block_data[0x27:-2],encoding='pseudo-binary')
-		dcp_crc16 = int.from_bytes(block_data[-2:],byteorder='little')
-		calc_crc = binascii.crc_hqx(block_data[0x0:-0x02],0xFFFF)
+	sig_strength = int.from_bytes(block_data[0x1A:0x1C],byteorder='little') & 0x03FF
+	freq_offset = int.from_bytes(block_data[0x1C:0x1E],byteorder='little')  & 0x3FFF
+	if freq_offset > 8191: # 2's complement conversion
+		freq_offset = freq_offset - 16384
 
-		print('\n----------[ DCP Block ]----------')
-		print('Header:')
-		print('    Size: {} Bytes ({} Bytes of Data)'.format(blk_len,blk_len-41)) # 39 Bytes for Header, 2 Bytes for CRC
-		print('    Seqeuence Number: {}'.format(seq_num))
-		print('    Flags:')
-		print('        Data Rate: {} Baud'.format(baud))
-		print('        Platform: {}'.format(platform))
-		print('        Parity Error? {}'.format(rx_parity))
+	phs_noise = int.from_bytes(block_data[0x1E:0x20],byteorder='little')  & 0x01FFF
+	mod_index = modulation_indicies[(int.from_bytes(block_data[0x1E:0x20],byteorder='little')  & 0x0C000) >> 14]
+	good_phs = int.from_bytes(block_data[0x20:0x21],byteorder='little')
 		
-		print('    ARM Flags: {}'.format(arm_text))
-		print('    Corrected Address: {}'.format(corrected_addr))
-		print('    Carrier Start: {}'.format(bcd_to_date(carr_start)))
-		print('    Message End: {}'.format(bcd_to_date(msg_start)))
-		print('    Signal Strength: {}dBm EIRP'.format(sig_strength/10))
-		print('    Frequency Offset: {}Hz'.format(freq_offset/10))
-		print('    Phase Noise: {}° RMS'.format(phs_noise/100))
-		print('    Modulation Index: {}'.format(mod_index))
-		print('    Good Phase: {}%'.format(good_phs/2))
-		print('    Channel: {}'.format(channel))
-		print('    Spacecraft: {}'.format(scids[spacecraft]))
-		print('    Source Code: {}'.format(source_code))
-		print('    Source Secondary: {}'.format(source_sec))
-		if dcp_crc16 == calc_crc:
-			print('    Block CRC: OK\n')
-		else:
-			print('    CRC: FAILED\n')
-		print('Data (Pseudo-Binary): \n{}'.format(dcp_data_pseudo))
+	channel  = int.from_bytes(block_data[0x21:0x23],byteorder='little') & 0x03FF
+	spacecraft = int.from_bytes(block_data[0x21:0x23],byteorder='little') >> 12
+	source_code = block_data[0x23:0x25].decode('ascii')
+	source_sec = block_data[0x25:0x27].decode('ascii')
+		
+	codecs.register(pseudo_search_func)
+	dcp_data_pseudo = codecs.decode(block_data[0x27:-2],encoding='pseudo-binary')
+	dcp_crc16 = int.from_bytes(block_data[-2:],byteorder='little')
+	calc_crc = binascii.crc_hqx(block_data[:-2],0xFFFF)
+
+	print('\n----------[ DCP Block ]----------')
+	print('Header:')
+	print('    Size: {} Bytes ({} Bytes of Data)'.format(blk_len,blk_len-41)) # 39 Bytes for Header, 2 Bytes for CRC
+	print('    Seqeuence Number: {}'.format(seq_num))
+	print('    Flags:')
+	print('        Data Rate: {} Baud'.format(baud))
+	print('        Platform: {}'.format(platform))
+	print('        Parity Error? {}'.format(rx_parity))	
+	print('    ARM Flags: {}'.format(arm_text))
+	print('    Corrected Address: {}'.format(corrected_addr))
+	print('    Carrier Start: {}'.format(bcd_to_date(carr_start)))
+	print('    Message End: {}'.format(bcd_to_date(msg_end)))
+	print('    Signal Strength: {}dBm EIRP'.format(sig_strength/10))
+	print('    Frequency Offset: {}Hz'.format(freq_offset/10))
+	print('    Phase Noise: {}° RMS'.format(phs_noise/100))
+	print('    Modulation Index: {}'.format(mod_index))
+	print('    Good Phase: {}%'.format(good_phs/2))
+	print('    Channel: {}'.format(channel))
+	print('    Spacecraft: {}'.format(scids[spacecraft]))
+	print('    Source Code: {}'.format(source_code))
+	print('    Source Secondary: {}'.format(source_sec))
+	if dcp_crc16 == calc_crc:
+			print('Block CRC: OK\n')
+	else:
+			print('CRC: FAILED\n')
+	print('Data (Pseudo-Binary): \n{}'.format(dcp_data_pseudo))
+
+def missed_block(block_data):
+	bauds = ['Undefined','100','300','1200']
+	scids = ['Unknown','GOES-East','GOES-West','GOES-Central','GOES-Test'] # Spacecraft ID's
+
+	blk_len = int.from_bytes(block_data[0x01:0x03],byteorder='little')
+	seq_num = int.from_bytes(block_data[0x03:0x06],byteorder='little')
+
+	flags = block_data[0x06]
+	baud = bauds[(flags & 0b111)]
+
+	platform_addr = hex(int.from_bytes(block_data[0x07:0x0B],byteorder='little'))
+	window_start = block_data[0x0B:0x12]
+	window_end = block_data[0x12:0x19]
+
+	channel  = int.from_bytes(block_data[0x21:0x23],byteorder='little') & 0x03FF
+	spacecraft = int.from_bytes(block_data[0x21:0x23],byteorder='little') >> 12
+
+	msg_crc16 = int.from_bytes(block_data[-2:],byteorder='little')
+	calc_crc = binascii.crc_hqx(block_data[:-2],0xFFFF)
+
+	print('\n-------[ Missed DCP Block ]-------')
+	print('Header:')
+	print('    Seqeuence Number: {}'.format(seq_num))
+	print('    Flags:')
+	print('        Data Rate: {} Baud'.format(baud))
+	print('    Platform Address: {}'.format(platform_addr))
+	print('    Window Start: {}'.format(bcd_to_date(window_start)))
+	print('    Window End: {}'.format(bcd_to_date(window_end)))
+	print('    Channel: {}'.format(channel))
+	print('    Spacecraft: {}'.format(scids[spacecraft]))
+
+	if msg_crc16 == calc_crc:
+			print('Block CRC: OK\n')
+	else:
+			print('CRC: FAILED\n')
 
 
 def main():
@@ -164,8 +193,16 @@ def main():
 	block_offset = 0x40
 	while block_offset < file_size-0x04:
 		block_length = int.from_bytes(file_data[block_offset+1:block_offset+3],byteorder='little')
-		dcpblock(file_data[block_offset:block_offset+block_length])
-		block_offset = block_offset + block_length
+		block_bytes = file_data[block_offset:block_offset+block_length]
+		block_id = int.from_bytes(block_bytes[0x00:0x01],byteorder='little')
+		
+		if block_id == 1:
+			dcp_block(block_bytes)
+		if block_id == 2:
+			missed_block(block_bytes)
+
+
+		block_offset += block_length
 
 if __name__ == '__main__':
     main()
