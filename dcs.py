@@ -3,6 +3,7 @@ import re
 import binascii
 import datetime
 import codecs
+import argparse
 
 
 
@@ -56,7 +57,7 @@ def pseudo_search_func(encoding_name):
 
 
 
-def dcp_block(block_data):
+def dcp_block(block_data,verbose):
 	bauds = ['Undefined','100','300','1200']
 	platforms = ['CS1', 'CS2']
 	modulation_indicies = ['Unknown','Normal','High','Low']
@@ -96,31 +97,36 @@ def dcp_block(block_data):
 	dcp_crc16 = int.from_bytes(block_data[-2:],byteorder='little')
 	calc_crc = binascii.crc_hqx(block_data[:-2],0xFFFF)
 
+
 	print('\n----------[ DCP Block ]----------')
-	print('Header:')
-	print('    Size: {} Bytes ({} Bytes of Data)'.format(blk_len,blk_len-41)) # 39 Bytes for Header, 2 Bytes for CRC
-	print('    Seqeuence Number: {}'.format(seq_num))
-	print('    Flags:')
-	print('        Data Rate: {} Baud'.format(baud))
-	print('        Platform: {}'.format(platform))
-	print('        Parity Error? {}'.format(rx_parity))	
-	print('    ARM Flags: {}'.format(arm_text))
-	print('    Corrected Address: {}'.format(corrected_addr))
-	print('    Carrier Start: {}'.format(bcd_to_date(carr_start)))
-	print('    Message End: {}'.format(bcd_to_date(msg_end)))
-	print('    Signal Strength: {}dBm EIRP'.format(sig_strength/10))
-	print('    Frequency Offset: {}Hz'.format(freq_offset/10))
-	print('    Phase Noise: {}° RMS'.format(phs_noise/100))
-	print('    Modulation Index: {}'.format(mod_index))
-	print('    Good Phase: {}%'.format(good_phs/2))
-	print('    Channel: {}'.format(channel))
-	print('    Spacecraft: {}'.format(scids[spacecraft]))
-	print('    Source Code: {}'.format(source_code))
-	print('    Source Secondary: {}'.format(source_sec))
-	if dcp_crc16 == calc_crc:
-			print('Block CRC: OK\n')
+	if verbose:
+		print('Header:')
+		print('    Size: {} Bytes ({} Bytes of Data)'.format(blk_len,blk_len-41)) # 39 Bytes for Header, 2 Bytes for CRC
+		print('    Seqeuence Number: {}'.format(seq_num))
+		print('    Flags:')
+		print('        Data Rate: {} Baud'.format(baud))
+		print('        Platform: {}'.format(platform))
+		print('        Parity Error? {}'.format(rx_parity))	
+		print('    ARM Flags: {}'.format(arm_text))
+		print('    Corrected Address: {}'.format(corrected_addr))
+		print('    Carrier Start: {}'.format(bcd_to_date(carr_start)))
+		print('    Message End: {}'.format(bcd_to_date(msg_end)))
+		print('    Signal Strength: {}dBm EIRP'.format(sig_strength/10))
+		print('    Frequency Offset: {}Hz'.format(freq_offset/10))
+		print('    Phase Noise: {}° RMS'.format(phs_noise/100))
+		print('    Modulation Index: {}'.format(mod_index))
+		print('    Good Phase: {}%'.format(good_phs/2))
+		print('    Channel: {}'.format(channel))
+		print('    Spacecraft: {}'.format(scids[spacecraft]))
+		print('    Source Code: {}'.format(source_code))
+		print('    Source Secondary: {}'.format(source_sec))
+		if dcp_crc16 == calc_crc:
+				print('Block CRC: OK\n')
+		else:
+				print('CRC: FAILED\n')
 	else:
-			print('CRC: FAILED\n')
+		print('Corrected Address: {}'.format(corrected_addr))
+
 	print('Data (Pseudo-Binary): \n{}'.format(dcp_data_pseudo))
 
 def missed_block(block_data):
@@ -161,17 +167,25 @@ def missed_block(block_data):
 
 
 def main():
-	print('DCS Decoder - Taylor Bates\n')
+
+	argparser = argparse.ArgumentParser()
+	argparser.add_argument("LRIT_File", help="An LRIT File containing a DCS Payload")
+	argparser.add_argument("-v","--verbose", help="Prints all header and data information",action="store_true")
+	args = argparser.parse_args()
+
 
 	# Open the file
-	with open(sys.argv[1],'rb') as file:
+	with open(args.LRIT_File,'rb') as file:
 		file_data = bytes(file.read())
-		locs = []
+
+	# Check LRIT File type
+	assert (file_data[0x03] == 130),"Non-DCS LRIT File!"
 
 	# Strip the HRIT Header
+	locs = []
 	for loc in re.finditer(b'pH',file_data):
 		locs.append(loc.start())
-	file_data = file_data[locs[1]:]
+	file_data = file_data[0x36:]
 
 	# DCS File Header
 	filename = file_data[0x0:0x20].decode('ascii')
@@ -197,8 +211,8 @@ def main():
 		block_id = int.from_bytes(block_bytes[0x00:0x01],byteorder='little')
 		
 		if block_id == 1:
-			dcp_block(block_bytes)
-		if block_id == 2:
+			dcp_block(block_bytes,args.verbose)
+		if block_id == 2 and args.verbose:
 			missed_block(block_bytes)
 
 
