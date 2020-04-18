@@ -7,6 +7,9 @@ Currently written in Python for simplicity
 To use simply run:<br/> 
 `python dcs.py <HRIT Binary File>`<br/>
 
+For more detailed information about a DCP Block:<br/>
+`python dcs.py <HRIT Binary File> -v`<br/>
+
 To acquire the files necessary you can utilize [pietern/goestools](https://github.com/pietern/goestools).<br/>
 Make sure you already have goesrecv running and then run this command:<br/>
 `goeslrit --subscribe tcp://localhost:5004 --dcs --out <output dir>`
